@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>鳴潮 音骸スコア計算アプリ (v4 - ランク表示)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Tailwind gray-100 */
+        }
+        .container {
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 1.5rem;
+            background-color: white;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-lg */
+        }
+        .input-group { /* For individual stat items and file input */
+            margin-bottom: 1rem;
+        }
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500; /* font-medium */
+            color: #374151; /* gray-700 */
+        }
+        .input-group input[type="number"], .input-group input[type="file"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #D1D5DB; /* gray-300 */
+            border-radius: 0.375rem; /* rounded-md */
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        .input-group input[type="number"]:focus, .input-group input[type="file"]:focus {
+            outline: none;
+            border-color: #60A5FA; /* blue-400 */
+            box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
+        }
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.375rem; /* rounded-md */
+            font-weight: 600; /* font-semibold */
+            transition: background-color 0.2s;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn-primary { background-color: #3B82F6; color: white; }
+        .btn-primary:hover { background-color: #2563EB; }
+        .btn-secondary { background-color: #6B7280; color: white; }
+        .btn-secondary:hover { background-color: #4B5563; }
+        .btn:disabled { background-color: #D1D5DB; cursor: not-allowed; }
+
+        #imagePreview { max-width: 100%; max-height: 400px; margin-top: 1rem; border-radius: 0.375rem; border: 1px solid #E5E7EB; object-fit: contain; }
+        .score-display { margin-top: 1.5rem; padding: 1.5rem; background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 0.5rem; text-align: center; }
+        .score-display h3 { font-size: 1.25rem; font-weight: 600; color: #1E40AF; margin-bottom: 0.5rem; }
+        .score-display p#scoreValue { font-size: 2.25rem; font-weight: 700; color: #1D4ED8; } /* text-4xl equivalent */
+        
+        #ocrStatus { margin-top: 0.5rem; font-style: italic; color: #4B5563; }
+        .spinner { width: 20px; height: 20px; border: 3px solid rgba(0,0,0,.1); border-radius: 50%; border-left-color: #3B82F6; animation: spin 1s ease infinite; display: inline-block; margin-right: 0.5rem; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        #statusFormInputs {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        /* Rank specific colors */
+        .rank-ss { color: #DC2626; } /* red-600 */
+        .rank-s { color: #F59E0B; }  /* amber-500 */
+        .rank-a { color: #3B82F6; }  /* blue-500 */
+        .rank-b { color: #6B7280; }  /* gray-500 */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">鳴潮 音骸スコア計算アプリ (v4 - ランク表示)</h1>
+            <p class="text-gray-600 mt-2">音骸のスクリーンショットをアップロードし、サブステータスを入力してスコアを計算します。</p>
+            <p class="text-sm text-red-600 mt-1"><b>注意:</b> OCR機能は実験的なものです。OCR結果を参考に正しいステータスと数値を選択してください。</p>
+        </header>
+
+        <div class="grid md:grid-cols-2 gap-8">
+            <div class="bg-gray-50 p-6 rounded-lg shadow">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">1. 音骸の画像を選択</h2>
+                <div class="input-group">
+                    <label for="echoImage" class="sr-only">画像ファイル (JPG, PNG):</label>
+                    <input type="file" id="echoImage" accept="image/jpeg, image/png">
+                </div>
+                <img id="imagePreview" src="https://placehold.co/600x400/e2e8f0/cbd5e0?text=画像プレビュー" alt="音骸 画像プレビュー" class="hidden">
+                <button type="button" id="ocrButton" class="btn btn-secondary w-full mt-4" disabled>
+                    <span id="ocrButtonText">OCRで数値を読み取る (参考用)</span>
+                    <div id="ocrSpinner" class="spinner hidden"></div>
+                </button>
+                <p id="ocrStatus" class="text-sm"></p>
+                <div id="ocrResultText" class="mt-2 p-2 bg-gray-100 border border-gray-300 rounded max-h-32 overflow-y-auto text-xs hidden">
+                    <h4 class="font-semibold mb-1">OCR認識結果 (参考):</h4>
+                    <pre id="ocrRawText" class="whitespace-pre-wrap"></pre>
+                </div>
+            </div>
+
+            <div class="bg-gray-50 p-6 rounded-lg shadow">
+                <h2 class="text-xl font-semibold text-gray-700 mb-4">2. サブステータスを入力</h2>
+                <form id="statusForm">
+                    <div id="statusFormInputs" class="mb-6">
+                        </div>
+                    <button type="button" id="calculateScoreBtn" class="btn btn-primary w-full">スコアを計算</button>
+                </form>
+
+                <div id="scoreResult" class="score-display hidden mt-6">
+                    <h3>計算された音骸スコア</h3>
+                    <p id="scoreValue">0</p>
+                    <div id="rankDisplay" class="mt-3">
+                        <span class="text-lg font-medium text-gray-700">評価ランク:</span>
+                        <span id="scoreRankText" class="text-2xl font-bold">-</span>
+                    </div>
+                    <div id="scoreBreakdown" class="text-sm text-gray-600 mt-2"></div>
+                </div>
+            </div>
+        </div>
+        <footer class="text-center mt-8 text-sm text-gray-500">
+            <p>※スコア計算式は一般的なものであり、ゲーム内の正確な評価基準とは異なる場合があります。</p>
+            <p>※このツールはファンメイドであり、ゲーム開発元とは一切関係ありません。</p>
+            <p>サブステータス情報は <a href="https://wikiwiki.jp/w-w/%E9%9F%B3%E9%AA%B8#sub_status" target="_blank" rel="noopener noreferrer" class="text-blue-500 hover:underline">鳴潮 Wiki</a> 及び提供データを参考にしています。</p>
+        </footer>
+    </div>
+
+    <script>
+        // DOM要素の取得
+        const echoImageInput = document.getElementById('echoImage');
+        const imagePreview = document.getElementById('imagePreview');
+        const placeholderText = imagePreview.src;
+        const ocrButton = document.getElementById('ocrButton');
+        const ocrButtonText = document.getElementById('ocrButtonText');
+        const ocrSpinner = document.getElementById('ocrSpinner');
+        const ocrStatus = document.getElementById('ocrStatus');
+        const ocrResultTextDiv = document.getElementById('ocrResultText');
+        const ocrRawTextPre = document.getElementById('ocrRawText');
+
+        const statusFormInputsContainer = document.getElementById('statusFormInputs');
+        const calculateScoreBtn = document.getElementById('calculateScoreBtn');
+        const scoreResultDiv = document.getElementById('scoreResult');
+        const scoreValueP = document.getElementById('scoreValue');
+        const scoreRankTextElement = document.getElementById('scoreRankText'); // Rank display element
+        const scoreBreakdownDiv = document.getElementById('scoreBreakdown');
+
+        let currentImageFile = null;
+        let worker = null;
+
+        // サブステータスの定義 (ユーザー提供データに基づいて更新済み)
+        const subStatusDefinitions = [
+            { value: "critRate", text: "会心率(%)", scoreMultiplier: 2, type: "percent", values: [6.3, 6.9, 7.5, 8.1, 8.7, 9.3, 9.9, 10.5], placeholder: "例: 10.5", step: 0.1 },
+            { value: "critDmg", text: "会心ダメージ(%)", scoreMultiplier: 1, type: "percent", values: [12.6, 13.8, 15.0, 16.2, 17.4, 18.6, 19.8, 21.0], placeholder: "例: 21.0", step: 0.1 },
+            { value: "atkPercent", text: "攻撃力(%)", scoreMultiplier: 1.5, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "hpPercent", text: "HP(%)", scoreMultiplier: 1, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "defPercent", text: "防御力(%)", scoreMultiplier: 1, type: "percent", values: [8.1, 9.0, 10.0, 10.9, 11.8, 12.8, 13.6, 14.7], placeholder: "例: 14.7", step: 0.1 },
+            { value: "atkFlat", text: "攻撃力(実数)", scoreMultiplier: (1/10), type: "flat", values: [0, 30, 40, 50, 60], placeholder: "例: 50", step: 1 },
+            { value: "hpFlat", text: "HP(実数)", scoreMultiplier: (1/100), type: "flat", values: [320, 360, 390, 430, 470, 510, 540, 580], placeholder: "例: 580", step: 1 },
+            { value: "defFlat", text: "防御力(実数)", scoreMultiplier: (1/20), type: "flat", values: [0, 40, 50, 60, 70], placeholder: "例: 60", step: 1 },
+            { value: "energyRegen", text: "共鳴効率(%)", scoreMultiplier: 1.2, type: "percent", values: [6.8, 7.6, 8.4, 9.2, 10.0, 10.8, 11.6, 12.4], placeholder: "例: 12.4", step: 0.1 },
+            { value: "normalAtkDmg", text: "通常攻撃ダメージ(%)", scoreMultiplier: 1.5, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "heavyAtkDmg", text: "重撃ダメージ(%)", scoreMultiplier: 1.5, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "skillDmg", text: "共鳴スキルダメージ(%)", scoreMultiplier: 1.5, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "liberationDmg", text: "共鳴解放ダメージ(%)", scoreMultiplier: 1.5, type: "percent", values: [6.4, 7.1, 7.9, 8.6, 9.4, 10.1, 10.9, 11.6], placeholder: "例: 11.6", step: 0.1 },
+            { value: "healingBonus", text: "治療効果(%)", scoreMultiplier: 1.2, type: "percent", values: [], placeholder: "例: 10.0", step: 0.1 }
+        ];
+        
+        // サブステータス入力フィールドを動的に生成
+        function populateStatusForm() {
+            statusFormInputsContainer.innerHTML = '';
+            subStatusDefinitions.forEach(stat => {
+                const div = document.createElement('div');
+                div.classList.add('input-group');
+
+                const label = document.createElement('label');
+                label.htmlFor = stat.value;
+                label.textContent = stat.text;
+                
+                const input = document.createElement('input');
+                input.type = 'number';
+                input.id = stat.value;
+                input.name = stat.value;
+                input.step = stat.step;
+                input.placeholder = stat.placeholder;
+                input.setAttribute('list', `${stat.value}DataList`);
+
+                const datalist = document.createElement('datalist');
+                datalist.id = `${stat.value}DataList`;
+                if (stat.values && stat.values.length > 0) {
+                    stat.values.forEach(val => {
+                        const option = document.createElement('option');
+                        option.value = val;
+                        datalist.appendChild(option);
+                    });
+                }
+                
+                div.appendChild(label);
+                div.appendChild(input);
+                div.appendChild(datalist);
+                statusFormInputsContainer.appendChild(div);
+            });
+        }
+        populateStatusForm();
+
+
+        // Tesseractワーカーの初期化
+        async function initializeWorker() {
+            ocrStatus.textContent = 'OCRエンジンを初期化中...';
+            ocrSpinner.classList.remove('hidden');
+            ocrButton.disabled = true;
+            try {
+                worker = await Tesseract.createWorker('jpn', 1, {
+                    logger: m => {
+                        if (m.status === 'recognizing text') {
+                            ocrStatus.textContent = `テキスト認識中... ${Math.round(m.progress * 100)}%`;
+                        } else if(m.status === 'loading language model') {
+                            ocrStatus.textContent = '言語モデルを読み込み中...';
+                        }
+                    },
+                });
+                ocrStatus.textContent = 'OCRエンジンの準備ができました。';
+            } catch (error) {
+                console.error("Tesseract Workerの初期化に失敗しました:", error);
+                ocrStatus.textContent = 'OCRエンジンの初期化に失敗しました。ページを再読み込みしてください。';
+                worker = null;
+            } finally {
+                ocrSpinner.classList.add('hidden');
+                ocrButton.disabled = currentImageFile === null || worker === null;
+            }
+        }
+        initializeWorker();
+
+        // 画像プレビュー機能
+        echoImageInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                currentImageFile = file;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    imagePreview.src = e.target.result;
+                    imagePreview.classList.remove('hidden');
+                }
+                reader.readAsDataURL(file);
+                ocrButton.disabled = worker === null;
+                ocrStatus.textContent = worker ? '画像を選択しました。OCRを実行できます (参考用)。' : 'OCRエンジンを初期化中です...';
+                ocrResultTextDiv.classList.add('hidden');
+                ocrRawTextPre.textContent = '';
+            } else {
+                currentImageFile = null;
+                imagePreview.src = placeholderText;
+                ocrButton.disabled = true;
+                ocrStatus.textContent = '';
+                ocrResultTextDiv.classList.add('hidden');
+                ocrRawTextPre.textContent = '';
+            }
+        });
+
+        // OCR処理の実行
+        ocrButton.addEventListener('click', async function() {
+            if (!currentImageFile || !worker) {
+                ocrStatus.textContent = '画像が選択されていないか、OCRエンジンが準備できていません。';
+                return;
+            }
+            ocrButtonText.textContent = 'OCR処理中...';
+            ocrSpinner.classList.remove('hidden');
+            ocrButton.disabled = true;
+            ocrStatus.textContent = 'OCR処理を開始しました...';
+            ocrResultTextDiv.classList.add('hidden');
+            ocrRawTextPre.textContent = '';
+
+            try {
+                const { data: { text } } = await worker.recognize(currentImageFile);
+                ocrStatus.textContent = 'OCR処理完了。結果を下に表示します。';
+                console.log("OCR Raw Text:", text);
+                ocrRawTextPre.textContent = text;
+                ocrResultTextDiv.classList.remove('hidden');
+            } catch (error) {
+                console.error("OCR処理中にエラーが発生しました:", error);
+                ocrStatus.textContent = 'OCR処理中にエラーが発生しました。';
+            } finally {
+                ocrButtonText.textContent = 'OCRで数値を読み取る (参考用)';
+                ocrSpinner.classList.add('hidden');
+                ocrButton.disabled = worker === null;
+            }
+        });
+
+        // スコア計算ロジック
+        calculateScoreBtn.addEventListener('click', function() {
+            let totalScore = 0;
+            let breakdown = [];
+
+            subStatusDefinitions.forEach(stat => {
+                const inputElement = document.getElementById(stat.value);
+                if (inputElement) {
+                    const statValue = parseFloat(inputElement.value) || 0;
+                    if (statValue >= 0) {
+                        if (statValue > 0 || (statValue === 0 && stat.type === 'flat')) {
+                            const score = statValue * stat.scoreMultiplier;
+                            if (score !== 0 || (statValue === 0 && stat.type === 'flat')) {
+                                let statNameForDisplay = stat.text;
+                                if (statNameForDisplay.includes("(%)")) {
+                                    statNameForDisplay = statNameForDisplay.replace("(%)", "").trim();
+                                } else if (statNameForDisplay.includes("(実数)")) {
+                                    statNameForDisplay = statNameForDisplay.replace("(実数)", "").trim();
+                                }
+                                breakdown.push(`${statNameForDisplay}: ${score.toFixed(1)}`);
+                            }
+                            totalScore += score;
+                        }
+                    }
+                }
+            });
+
+            scoreValueP.textContent = totalScore.toFixed(1);
+
+            // ランク判定と表示
+            let rank = "-";
+            let rankColorClass = ""; // Tailwind CSS class for rank color
+
+            if (totalScore >= 65) {
+                rank = "SS級";
+                rankColorClass = "rank-ss"; // text-red-600
+            } else if (totalScore >= 45) {
+                rank = "S級";
+                rankColorClass = "rank-s";  // text-orange-500 (amber-500 in style)
+            } else if (totalScore >= 25) {
+                rank = "A級";
+                rankColorClass = "rank-a";  // text-blue-500
+            } else {
+                rank = "B級";
+                rankColorClass = "rank-b";  // text-gray-500
+            }
+            scoreRankTextElement.textContent = rank;
+            // Remove previous rank color classes before adding new one
+            scoreRankTextElement.classList.remove("rank-ss", "rank-s", "rank-a", "rank-b", "text-gray-700");
+            scoreRankTextElement.classList.add(rankColorClass);
+
+
+            scoreBreakdownDiv.innerHTML = breakdown.length > 0 ? `内訳: ${breakdown.join(', ')}` : "有効なサブステータスが入力されていません。";
+            scoreResultDiv.classList.remove('hidden');
+        });
+        
+        // ウィンドウが閉じられるかリロードされる前にワーカーを終了
+        window.addEventListener('beforeunload', async () => {
+            if (worker) {
+                console.log("Terminating Tesseract worker...");
+                await worker.terminate();
+                worker = null;
+                console.log("Tesseract worker terminated.");
+            }
+        });
+    </script>
+</body>
+</html>
+
